@@ -1,0 +1,163 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <errno.h>
+#include "memlog.h"
+#include "msgassert.h"
+
+// constantes definindo os estados de registro
+#define MLATIVO 1
+#define MLINATIVO 0
+
+// variavel estatica de registro de acessos
+//static memlog_tipo ml;
+
+// Descricao: calcula a diferenca entre t2 e t1, que e armazenada em res
+// Entrada: t1, t2
+// Saida: res
+void clkDifMemLog(struct timespec t1, struct timespec t2, 
+                   struct timespec * res)
+                   {
+  if (t2.tv_nsec < t1.tv_nsec){
+    // ajuste necessario, utilizando um segundo de tv_sec
+    res-> tv_nsec = 1000000000+t2.tv_nsec-t1.tv_nsec;
+    res-> tv_sec = t2.tv_sec-t1.tv_sec-1;
+  } else {
+    // nao e necessario ajuste
+    res-> tv_nsec = t2.tv_nsec-t1.tv_nsec;
+    res-> tv_sec = t2.tv_sec-t1.tv_sec;
+  }
+}
+
+// Descricao: inicializa o registro de acessos, abrindo o arquivo nome
+// Entrada: nome
+// Saida: nao tem
+int iniciaMemLog(char * nome){
+
+  // escolhe modo do relogio
+  ml.clk_id = CLOCK_MONOTONIC;
+
+  // abre arquivo de registro e verifica se foi aberto corretamente
+  ml.log = fopen(nome,"wt");
+  erroAssert(ml.log != NULL,"Cannot open memlog output");
+
+  // captura o tempo inicial do registro
+  struct timespec tp;
+  int result = clock_gettime(ml.clk_id,&tp);
+  ml.inittime.tv_sec = tp.tv_sec;
+  ml.inittime.tv_nsec = tp.tv_nsec;
+
+  // inicializa variaveis do TAD
+  ml.count = 1;
+  ml.ativo = MLATIVO;
+  ml.fase = 0;
+
+  // imprime registro inicial
+  int retprint = fprintf(ml.log,"I %ld %ld.%ld\n", 
+                         ml.count,tp.tv_sec,tp.tv_nsec);
+  erroAssert(retprint>=0,"Nao foi possivel escrever registro");
+  return result;
+}
+
+// Descricao: ativa o registro de acessos
+// Entrada: nao tem
+// Saida: MLATIVO
+int ativaMemLog(){
+
+  ml.ativo = MLATIVO;
+  return MLATIVO;
+}
+
+// Descricao: desativa o registro de acessos
+// Entrada: nao tem
+// Saida: MLINATIVO
+int desativaMemLog(){
+  
+  ml.ativo = MLINATIVO;
+  return MLINATIVO;
+}
+
+// Descricao: define a fase de registro de acessos 
+// Entrada: f
+// Saida: valor de f
+int defineFaseMemLog(int f){
+  
+  ml.fase = f;
+  return f;
+}
+
+// Descricao: registra acesso de leitura de tam bytes na posicao pos 
+// Entrada: pos,tam
+// Saida: resultado da obtencao do relogio
+int leMemLog(long int pos, long int tam, int id){
+
+  // verifica se registro esta ativo
+  if (ml.ativo == MLINATIVO) return 0;
+
+  // captura tempo atual
+  struct timespec tp, tdif;
+  int result = clock_gettime(ml.clk_id,&tp);
+
+  // calcula a diferencao com tempo inicial, para economia de armazenamento
+  clkDifMemLog(ml.inittime,tp,&tdif);
+
+  // atualiza contador
+  ml.count++;
+  
+  // imprime registro
+  int retprint = fprintf(ml.log,"L %d %ld %d %ld.%.9ld %ld %ld\n",
+          ml.fase, ml.count, id, tdif.tv_sec, tdif.tv_nsec, pos, tam);
+  erroAssert(retprint>=0,"Nao foi possivel escrever registro");
+  return result;
+}
+
+// Descricao: registra acesso de escrita de tam bytes na posicao pos
+// Entrada: pos, tam
+// Saida: resultado da obtencao do relogio
+int escreveMemLog(long int pos, long int tam, int id){
+
+  // verifica se registro esta ativo
+  if (ml.ativo == MLINATIVO) return 0;
+
+  // captura tempo atual
+  struct timespec tp,tdif;
+  int result = clock_gettime(ml.clk_id,&tp);
+
+  // calcula a diferencao com tempo inicial, para economia de armazenamento
+  clkDifMemLog(ml.inittime,tp,&tdif);
+
+  // atualiza contador
+  ml.count++;
+
+  // imprime registro
+  int retprint = fprintf(ml.log,"E %d %ld %d %ld.%.9ld %ld %ld\n",
+          ml.fase, ml.count, id, tdif.tv_sec, tdif.tv_nsec, pos, tam);
+  erroAssert(retprint>=0,"Nao foi possivel escrever registro");
+  return result;
+}
+
+// Descricao: finaliza o registro de acessos a memoria
+// Entrada: nao tem
+// Saida: resultado da obtencao do relogio
+int finalizaMemLog(){
+
+  // captura o tempo atual
+  struct timespec tp;
+  int result = clock_gettime(ml.clk_id,&tp);
+
+  // atualiza contador
+  ml.count++;
+
+  // imprime registro final
+  int retprint = fprintf(ml.log,"F %ld %ld.%ld\n",
+                         ml.count, tp.tv_sec,tp.tv_nsec);
+  erroAssert(retprint>=0,"Nao foi possivel escrever registro");
+
+  // fecha arquivo de registro
+  int retclose = fclose(ml.log);
+  erroAssert(retclose == 0,"Nao foi possivel fechar o arquivo de registro");
+
+  // atualiza variavel de estado
+  ml.ativo = MLINATIVO;
+  return result;
+}
